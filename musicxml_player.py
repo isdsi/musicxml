@@ -24,6 +24,17 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon, QFont, QAction
 
+# 무설치 포터블 패키징을 위한 내부 bin/ 바이너리 폴더 PATH 최우선적 연동
+base_dir = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__)
+bin_path = os.path.join(base_dir, "bin")
+if os.path.exists(bin_path):
+    os.environ["PATH"] = bin_path + os.path.pathsep + os.environ["PATH"]
+    if hasattr(os, "add_dll_directory"):
+        try:
+            os.add_dll_directory(bin_path)
+        except Exception:
+            pass
+
 # Fluidsynth 바인딩 임포트
 try:
     import fluidsynth

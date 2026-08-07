@@ -11,3 +11,4 @@ dist/
 
 # 대용량 바이너리 (SoundFont)
 FluidR3_GM.sf2
+*.zip

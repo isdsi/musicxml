@@ -129,6 +129,84 @@ if ($Target -eq "all" -or $Target -eq "musicxml_to_ogg") {
 
 if ($Target -eq "all" -or $Target -eq "musicxml_player") {
     Build-Target -name "musicxml_player" -script "musicxml_player.py" -useMusic21 $true -noconsole $true
+    
+    # -----------------------------------------------------------------------
+    # 무설치 포터블 배포 패키지 (ZIP) 자동 빌드 및 수집 프로세스
+    # -----------------------------------------------------------------------
+    Write-Host ""
+    Write-Host "[패키징] 무설치 포터블 배포판(Portable Edition) ZIP 패키징을 시작합니다..." -ForegroundColor Cyan
+    
+    $TempDir = Join-Path $ScriptDir "musicxml_player_portable"
+    $BinDir = Join-Path $TempDir "bin"
+    $ZipPath = Join-Path $ScriptDir "musicxml-player-win64-portable.zip"
+    
+    # 기존 임시 폴더 및 ZIP이 존재한다면 제거 초기화
+    if (Test-Path $TempDir) { Remove-Item -Recurse -Force $TempDir }
+    if (Test-Path $ZipPath) { Remove-Item -Force $ZipPath }
+    
+    # 폴더 구조 생성
+    New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
+    
+    # 1. 빌드 완료된 플레이어 EXE 복사
+    if (Test-Path ".\musicxml_player.exe") {
+        Copy-Item -Path ".\musicxml_player.exe" -Destination $TempDir -Force
+        Write-Host "  [복사] musicxml_player.exe ➔ $TempDir" -ForegroundColor Gray
+    }
+    
+    # 2. 필수 SoundFont 파일 복사
+    if (Test-Path ".\FluidR3_GM.sf2") {
+        Copy-Item -Path ".\FluidR3_GM.sf2" -Destination $TempDir -Force
+        Write-Host "  [복사] FluidR3_GM.sf2 ➔ $TempDir" -ForegroundColor Gray
+    }
+    
+    # 3. Fluidsynth CLI 및 모든 연관 DLL 동적 복사
+    $FluidCmd = Get-Command fluidsynth -ErrorAction SilentlyContinue
+    if ($FluidCmd) {
+        $FluidDir = Split-Path $FluidCmd.Source -Parent
+        if (Test-Path $FluidDir) {
+            Copy-Item -Path (Join-Path $FluidDir "fluidsynth.exe") -Destination $BinDir -Force
+            Copy-Item -Path (Join-Path $FluidDir "*.dll") -Destination $BinDir -Force
+            Write-Host "  [복사] Fluidsynth 연동 모듈 및 DLL 복사 완료" -ForegroundColor Gray
+        }
+    } else {
+        Write-Warning "시스템 PATH에서 fluidsynth를 찾지 못했습니다. 외부 라이브러리 팩 복사가 생략되었습니다."
+    }
+    
+    # 4. FFmpeg 및 FFprobe CLI 바이너리 동적 복사 (내보내기 필수)
+    $FfmpegCmd = Get-Command ffmpeg -ErrorAction SilentlyContinue
+    if ($FfmpegCmd) {
+        $FfmpegDir = Split-Path $FfmpegCmd.Source -Parent
+        if (Test-Path $FfmpegDir) {
+            if (Test-Path (Join-Path $FfmpegDir "ffmpeg.exe")) {
+                Copy-Item -Path (Join-Path $FfmpegDir "ffmpeg.exe") -Destination $BinDir -Force
+            }
+            if (Test-Path (Join-Path $FfmpegDir "ffprobe.exe")) {
+                Copy-Item -Path (Join-Path $FfmpegDir "ffprobe.exe") -Destination $BinDir -Force
+            }
+            if (Test-Path (Join-Path $FfmpegDir "*.dll")) {
+                Copy-Item -Path (Join-Path $FfmpegDir "*.dll") -Destination $BinDir -Force
+            }
+            Write-Host "  [복사] FFmpeg/FFprobe 음원 인코더 복사 완료" -ForegroundColor Gray
+        }
+    } else {
+        Write-Warning "시스템 PATH에서 ffmpeg를 찾지 못했습니다. 음원 내보내기 팩 복사가 생략되었습니다."
+    }
+    
+    # 5. ZIP 압축 아카이브 빌드 수행
+    Write-Host "[압축] 배포판 압축 파일 생성 중: $ZipPath" -ForegroundColor Cyan
+    Compress-Archive -Path "$TempDir\*" -DestinationPath $ZipPath -Force
+    
+    # 생성 완료 후 임시 디렉터리 자원 청소
+    Remove-Item -Recurse -Force $TempDir
+    
+    if (Test-Path $ZipPath) {
+        $ZipSize = [math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
+        Write-Host ""
+        Write-Host "[성공] 무설치 포터블 배포판 ZIP 패키지 생성 완료!" -ForegroundColor Green
+        Write-Host "  위치 : $ZipPath" -ForegroundColor Green
+        Write-Host "  크기 : ${ZipSize} MB" -ForegroundColor Green
+        Write-Host ""
+    }
 }
 
 Write-Host ""
