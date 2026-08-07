@@ -12,7 +12,7 @@
 #   musicxml_to_ogg   : MusicXML ➔ OGG 변환기 빌드 (시간이 수 분 소요됨)
 
 Param(
-    [ValidateSet("all", "midi_to_musicxml", "musicxml_to_midi", "midi_to_ogg", "musicxml_to_ogg")]
+    [ValidateSet("all", "midi_to_musicxml", "musicxml_to_midi", "midi_to_ogg", "musicxml_to_ogg", "musicxml_player")]
     [string]$Target = "all"
 )
 
@@ -56,7 +56,7 @@ if (Test-Path $VenvPyinstaller) {
 }
 
 # 2. 빌드 헬퍼 함수 정의
-function Build-Target([string]$name, [string]$script, [bool]$useMusic21) {
+function Build-Target([string]$name, [string]$script, [bool]$useMusic21, [bool]$noconsole = $false) {
     Write-Host ""
     Write-Host "======================================================" -ForegroundColor Cyan
     Write-Host "  빌드 시작: $name.exe" -ForegroundColor Cyan
@@ -71,6 +71,10 @@ function Build-Target([string]$name, [string]$script, [bool]$useMusic21) {
         "--specpath", ".",
         "--noconfirm"
     )
+    
+    if ($noconsole) {
+        $args += "--noconsole"
+    }
     
     if ($useMusic21) {
         # music21 라이브러리 리소스 수집 및 누락되는 임포트 강제 추가
@@ -121,6 +125,10 @@ if ($Target -eq "all" -or $Target -eq "midi_to_ogg") {
 
 if ($Target -eq "all" -or $Target -eq "musicxml_to_ogg") {
     Build-Target -name "musicxml_to_ogg" -script "musicxml_to_ogg.py" -useMusic21 $true
+}
+
+if ($Target -eq "all" -or $Target -eq "musicxml_player") {
+    Build-Target -name "musicxml_player" -script "musicxml_player.py" -useMusic21 $true -noconsole $true
 }
 
 Write-Host ""

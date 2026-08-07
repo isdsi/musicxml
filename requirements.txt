@@ -17,3 +17,7 @@ pydub>=0.25.1
 
 # Python 3.13 이상에서 삭제된 내장 audioop 백포트 (pydub 호환성 유지 목적)
 audioop-lts; python_version >= "3.13"
+
+# GUI 플레이어 라이브러리 (musicxml_player.py 구동용)
+PySide6>=6.0.0
+

@@ -105,42 +105,77 @@ MIDI 음원을 오디오 파일로 합성하기 위해서는 사운드폰트(`.s
 
 ---
 
-### 2. OGG 오디오 파일 변환 (렌더링)
+### 2. OGG / MP3 / WAV 오디오 파일 변환 (렌더링)
 
-이 변환 단계는 내부적으로 FluidSynth CLI를 호출하여 MIDI 데이터를 사운드폰트 기반으로 합성한 후 OGG 파일로 저장합니다.
+이 변환 단계는 내부적으로 FluidSynth CLI를 호출하여 MIDI 데이터를 사운드폰트 기반으로 합성한 후 지정한 포맷의 오디오 파일로 저장합니다.
+*   **지원 형식**: OGG, MP3, WAV (출력 파일의 확장자에 따라 자동 판정되거나 `--format` 옵션으로 수동 지정 가능, 기본값은 **OGG**)
+*   **MP3 변환 참고**: MP3 출력을 사용하려면 시스템에 `pydub` 파이썬 패키지와 외부 도구인 `FFmpeg`가 설치되어 있어야 합니다. (통합 설치 스크립트 `setup.ps1`을 사용했다면 이미 완벽하게 설정되어 있습니다.)
 
-#### A. MIDI ➔ OGG 변환
-[`midi_to_ogg.py`](./midi_to_ogg.py)를 사용합니다.
+#### A. MIDI ➔ 오디오 변환
+[`midi_to_ogg.py`](./midi_to_ogg.py)를 사용합니다. (파일명은 OGG 형식이지만, MP3/WAV 출력도 완전히 지원합니다.)
 
-*   **기본 변환**:
+*   **기본 변환 (OGG 출력)**:
     ```bash
     python midi_to_ogg.py song.mid
     ```
-    ➔ `FluidR3_GM.sf2`를 사용하여 변환된 `song.ogg` 파일이 생성됩니다.
-*   **사운드폰트 파일 및 볼륨 게인 지정**:
+    ➔ `FluidR3_GM.sf2`를 사용하여 `song.ogg` 파일이 생성됩니다.
+*   **WAV 또는 MP3 포맷 지정 출력**:
     ```bash
-    python midi_to_ogg.py song.mid out.ogg --sf2 path/to/soundfont.sf2 --gain 1.2
+    # 출력 파일 확장자를 통한 자동 판정
+    python midi_to_ogg.py song.mid song.wav
+    python midi_to_ogg.py song.mid song.mp3
+
+    # --format 옵션을 통한 명시적 변환
+    python midi_to_ogg.py song.mid --format mp3
+    ```
+*   **상세 옵션 지정**:
+    ```bash
+    python midi_to_ogg.py song.mid out.mp3 --sf2 path/to/soundfont.sf2 --gain 1.2
     ```
     *   `--gain`: 전체 마스터 볼륨 배율 (0.0 ~ 10.0, 기본값: `0.8`)
     *   `--sample-rate`: 샘플레이트 Hz 설정 (기본값: `44100`)
 
-#### B. MusicXML ➔ OGG 변환
-[`musicxml_to_ogg.py`](./musicxml_to_ogg.py)를 사용합니다. 내부적으로 MusicXML을 임시 MIDI로 1차 변환한 뒤, 이를 다시 FluidSynth를 통해 OGG 파일로 변환합니다.
+#### B. MusicXML ➔ 오디오 변환
+[`musicxml_to_ogg.py`](./musicxml_to_ogg.py)를 사용합니다. 내부적으로 MusicXML을 임시 MIDI로 1차 변환한 뒤, 이를 다시 오디오 파일로 최종 합성합니다.
 
-*   **기본 변환**:
+*   **기본 변환 (OGG 출력)**:
     ```bash
     python musicxml_to_ogg.py song.xml
     ```
     ➔ `song.ogg`가 생성되며, 중간에 생성된 임시 `song.mid` 파일은 자동 삭제됩니다.
-*   **중간 변환된 임시 MIDI 파일 보존**:
+*   **WAV 또는 MP3 포맷 지정 출력**:
     ```bash
-    python musicxml_to_ogg.py song.xml --keep-mid
+    # 출력 파일 확장자를 통한 자동 판정
+    python musicxml_to_ogg.py song.xml song.wav
+    python musicxml_to_ogg.py song.xml song.mp3
+
+    # --format 옵션을 통한 명시적 변환
+    python musicxml_to_ogg.py song.xml --format wav
     ```
-    ➔ OGG 파일과 함께 `song.mid` 파일도 보존됩니다.
-*   **사운드폰트 및 상세 옵션 지정**:
+*   **임시 MIDI 파일 보존 및 상세 옵션 지정**:
     ```bash
-    python musicxml_to_ogg.py song.xml out.ogg --sf2 FluidR3_GM.sf2 --gain 1.0 --sample-rate 48000
+    python musicxml_to_ogg.py song.xml out.mp3 --keep-mid --sf2 FluidR3_GM.sf2 --gain 1.0 --sample-rate 48000
     ```
+
+---
+
+## 🖥️ PySide6 GUI 플레이어 사용법 (`musicxml_player.py`)
+
+MusicXML 및 MIDI 파일을 열어 사운드폰트 기반으로 감상하고, 이를 다양한 형식으로 저장(Export)할 수 있는 직관적인 GUI 데스크톱 플레이어 애플리케이션입니다.
+
+*   **실행 방법**:
+    가상환경이 활성화된 상태에서 아래 명령어를 실행합니다.
+    ```bash
+    python musicxml_player.py
+    ```
+*   **핵심 기능**:
+    *   **파일 불러오기**: 메뉴 바의 `파일` -> `불러오기(Open)`를 통해 MusicXML(`.xml`, `.mxl`) 및 MIDI(`.mid`, `.midi`) 파일을 불러옵니다.
+    *   **실시간 오디오 합성 재생**: FluidSynth 플레이어를 활용하여 즉각적인 실시간 재생, 일시정지, 정지 기능을 제어합니다.
+    *   **볼륨 제어**: 하단의 볼륨 슬라이더를 조정하여 신디사이저 마스터 볼륨 게인을 실시간으로 0.0~1.0 배율로 조절합니다.
+    *   **커스텀 사운드폰트 교체**: 메인 화면의 `사운드폰트 변경...` 단추를 눌러 다른 커스텀 `.sf2` 음색 파일로 동적 교체할 수 있습니다. (기본값: 프로젝트 루트 내의 `FluidR3_GM.sf2`)
+    *   **다른 형식으로 저장하기(내보내기)**: 메뉴 바의 `파일` -> `저장하기(Export)`를 눌러 불러온 악보 리소스를 `MIDI`, `MusicXML`, `OGG`, `MP3`, `WAV` 중 원하는 포맷을 선택해 변환 저장합니다.
+*   **💡 윈도우 연결 프로그램 및 자동 재생 지원 (더블클릭 실행)**:
+    *   윈도우 탐색기에서 `.mxl`, `.xml`, `.mid`, `.midi` 파일의 연결 프로그램으로 빌드된 `musicxml_player.exe` 파일을 등록해 두면, 악보 파일을 **더블클릭하는 즉시 프로그램이 실행되며 자동으로 소리가 즉시 재생(Auto-Play)**됩니다.
 
 ---
 
@@ -159,10 +194,13 @@ MIDI 음원을 오디오 파일로 합성하기 위해서는 사운드폰트(`.s
 프로젝트에 포함된 통합 빌드 스크립트인 [`build.ps1`](./build.ps1)을 통해 타겟별로 혹은 일괄적으로 빌드할 수 있습니다.
 
 ```powershell
-# 1. 전체 변환 도구 빌드 (4개 전체 일괄 빌드)
+# 1. 전체 변환 도구 및 GUI 플레이어 빌드 (일괄 빌드)
 .\build.ps1 -Target all
 
-# 2. 특정 변환 도구 개별 빌드
+# 2. GUI 플레이어 개별 빌드 (콘솔 창 없는 윈도우 전용 EXE)
+.\build.ps1 -Target musicxml_player
+
+# 3. 특정 변환 도구 개별 빌드
 .\build.ps1 -Target midi_to_musicxml
 .\build.ps1 -Target musicxml_to_midi
 .\build.ps1 -Target midi_to_ogg
@@ -175,13 +213,14 @@ MIDI 음원을 오디오 파일로 합성하기 위해서는 사운드폰트(`.s
 빌드 스크립트 내부에서는 `pyinstaller` 명령에 다음 옵션을 결합하여 빌드를 수행합니다:
 *   `--onefile`: 단일 실행 파일(`.exe`) 형태로 패키징합니다.
 *   `--clean`: 빌드 전에 PyInstaller 캐시를 청소합니다.
+*   `--noconsole` (GUI 전용): `musicxml_player` 빌드 시 적용되며, 실행 시 터미널(검은색 콘솔 창)이 뜨지 않도록 지정합니다.
 *   `--collect-all music21`: `music21` 라이브러리의 복잡한 메타데이터 및 종속 리소스 파일을 실행 파일 내부에 완전하게 병합합니다. (변환 오류 방지 필수 옵션)
 *   `--hidden-import`: 동적 임포트되는 내부 모듈(`music21.midi`, `music21.stream` 등)을 누락 없이 포함하도록 강제합니다.
 
 ### 빌드 결과물 위치
 빌드가 성공적으로 끝나면 빌드 로그 하단에 녹색 완료 메시지가 나타납니다.
 *   빌드 결과 파일(EXE)은 **프로젝트 루트 폴더(현재 디렉터리)**에 직접 생성됩니다.
-    *   예: `.\musicxml_to_ogg.exe`
+    *   예: `.\musicxml_to_ogg.exe`, `.\musicxml_player.exe`
 *   중간 빌드 부산물은 `build/` 디렉터리와 `.spec` 파일에 생성되며, 빌드가 끝난 뒤 안전하게 삭제해도 무방합니다. (PyInstaller가 임시로 빈 `dist/` 폴더를 생성할 수 있으나 결과 EXE 파일은 루트 폴더에 위치하므로 안심하고 삭제하셔도 됩니다.)
 
 ---
