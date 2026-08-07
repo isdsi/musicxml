@@ -1,0 +1,19 @@
+# MusicXml 변환 도구 의존성
+# 설치: pip install -r requirements.txt
+
+# 악보 파싱 및 MusicXML 변환 (mid ↔ musicxml, abc, krn 등)
+music21>=9.1.0
+
+# FluidSynth Python 바인딩 (MIDI → WAV 렌더링)
+# 별도로 FluidSynth 바이너리 설치 필요:
+#   Windows: https://github.com/FluidSynth/fluidsynth/releases
+#   macOS:   brew install fluidsynth
+#   Linux:   sudo apt install fluidsynth
+pyfluidsynth>=1.3.3
+
+# WAV → MP3 / OGG 인코딩 (ffmpeg 바이너리 필요)
+# ffmpeg 설치: https://ffmpeg.org/download.html
+pydub>=0.25.1
+
+# Python 3.13 이상에서 삭제된 내장 audioop 백포트 (pydub 호환성 유지 목적)
+audioop-lts; python_version >= "3.13"
