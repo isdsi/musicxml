@@ -5,10 +5,10 @@ musicxml_player.py
 PySide6와 FluidSynth를 이용한 MusicXML & MIDI 신디사이저 플레이어입니다.
 
 기능:
-- MusicXML (.xml, .mxl), MIDI (.mid, .midi) 파일 불러오기 및 재생
+- MusicXML (.xml, .mxl), MIDI (.mid, .midi), MML (.mml, 3MLE 형식) 파일 불러오기 및 재생
 - FluidR3_GM.sf2 및 사용자 커스텀 사운드폰트(.sf2) 연동
 - 재생, 일시정지, 중단, 실시간 볼륨(마스터 게인) 조절
-- 로드된 파일을 MIDI, MusicXML, OGG, MP3, WAV로 저장(Export) 지원
+- 로드된 파일을 MIDI, MusicXML, MML, OGG, MP3, WAV로 저장(Export) 지원
 """
 
 import sys
@@ -49,6 +49,8 @@ try:
     from musicxml_to_midi import convert_music as mxml_to_midi_convert
     from musicxml_to_ogg import musicxml_to_ogg
     from midi_to_ogg import midi_to_ogg
+    from mml_to_midi import mml_to_midi as mml_to_midi_convert
+    from midi_to_mml import midi_to_mml as midi_to_mml_convert
 except ImportError as e:
     print(f"[경고] 일부 변환 모듈을 로드하지 못했습니다: {e}")
     print("  변환 내보내기 기능이 제한될 수 있습니다.")
@@ -92,7 +94,7 @@ class MusicXMLPlayer(QMainWindow):
         # 윈도우 연결 프로그램 및 명령행 인자 기동 처리 (자동 연주)
         if len(sys.argv) > 1:
             startup_file = sys.argv[1]
-            if os.path.exists(startup_file) and Path(startup_file).suffix.lower() in (".xml", ".mxl", ".mid", ".midi"):
+            if os.path.exists(startup_file) and Path(startup_file).suffix.lower() in (".xml", ".mxl", ".mid", ".midi", ".mml"):
                 # GUI 창이 완전히 뜬 후 안정적으로 파일을 로드하고 연주를 기동
                 QTimer.singleShot(100, lambda: self.load_file(startup_file))
                 QTimer.singleShot(600, self.on_play_clicked)
@@ -249,7 +251,7 @@ class MusicXMLPlayer(QMainWindow):
         
         self.lbl_title = QLabel("Please select a file to play.")
         self.lbl_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #f4f4f5;")
-        self.lbl_meta = QLabel("Supported Formats: MusicXML (.xml, .mxl), MIDI (.mid, .midi)")
+        self.lbl_meta = QLabel("Supported Formats: MusicXML (.xml, .mxl), MIDI (.mid, .midi), MML (.mml)")
         self.lbl_meta.setStyleSheet("font-size: 13px; color: #a1a1aa;")
         
         card_layout.addWidget(self.lbl_title)
@@ -372,7 +374,7 @@ class MusicXMLPlayer(QMainWindow):
 
     def on_open_file(self):
         """다이얼로그를 통해 악보 및 MIDI 파일을 로드합니다."""
-        file_filter = "Score and MIDI Files (*.xml *.mxl *.mid *.midi)"
+        file_filter = "Score, MIDI and MML Files (*.xml *.mxl *.mid *.midi *.mml)"
         file_path, _ = QFileDialog.getOpenFileName(
             self, "Open Music File", "", file_filter
         )
@@ -393,23 +395,27 @@ class MusicXMLPlayer(QMainWindow):
         self.lbl_title.setText(path_obj.name)
         self.lbl_meta.setText(f"File Path: {file_path}")
 
-        # MusicXML 변환 우회
-        if suffix in (".xml", ".mxl"):
+        # MusicXML / MML 변환 우회
+        if suffix in (".xml", ".mxl", ".mml"):
             self.lbl_title.setText(f"[Converting...] {path_obj.name}")
             QApplication.processEvents() # UI 반영 대기
-            
+
             try:
                 # 임시 midi 파일 작성 경로 획득
                 self.temp_midi_obj = tempfile.NamedTemporaryFile(suffix=".mid", delete=False)
                 self.temp_midi_obj.close() # 쓰기 잠금 해제
                 temp_path = self.temp_midi_obj.name
-                
-                # musicxml_to_midi 모듈 호출하여 임시 변환
-                mxml_to_midi_convert(file_path, temp_path)
+
+                # 형식에 맞는 변환 모듈 호출하여 임시 변환
+                if suffix == ".mml":
+                    mml_to_midi_convert(file_path, temp_path)
+                else:
+                    mxml_to_midi_convert(file_path, temp_path)
                 self.current_midi_file = temp_path
                 self.lbl_title.setText(path_obj.name)
             except Exception as e:
-                QMessageBox.critical(self, "Conversion Failed", f"An error occurred while parsing MusicXML:\n{e}")
+                kind = "MML" if suffix == ".mml" else "MusicXML"
+                QMessageBox.critical(self, "Conversion Failed", f"An error occurred while parsing {kind}:\n{e}")
                 self.current_file = None
                 self.current_midi_file = None
                 self.lbl_title.setText("Please select a file to play.")
@@ -436,6 +442,7 @@ class MusicXMLPlayer(QMainWindow):
             "MIDI Files (*.mid);;"
             "MusicXML Scores (*.xml);;"
             "Compressed MusicXML (*.mxl);;"
+            "MML Text (*.mml);;"
             "OGG Audio (*.ogg);;"
             "MP3 Audio (*.mp3);;"
             "WAV Audio (*.wav)"
@@ -456,11 +463,27 @@ class MusicXMLPlayer(QMainWindow):
         self.lbl_total_time.setText("Exporting...")
         QApplication.processEvents()
 
+        temp_bridge_midi = None  # xml/mml 상호 변환 시 거쳐가는 임시 MIDI 파일
+
+        def bridge_to_midi():
+            """src_path(xml/mxl/mml)를 임시 MIDI 파일로 변환하고 그 경로를 돌려줍니다."""
+            nonlocal temp_bridge_midi
+            tmp = tempfile.NamedTemporaryFile(suffix=".mid", delete=False)
+            tmp.close()
+            temp_bridge_midi = tmp.name
+            if src_ext == ".mml":
+                mml_to_midi_convert(src_path, temp_bridge_midi)
+            else:
+                mxml_to_midi_convert(src_path, temp_bridge_midi)
+            return temp_bridge_midi
+
         try:
             # 1. MIDI 내보내기
             if ext in (".mid", ".midi"):
                 if src_ext in (".xml", ".mxl"):
                     mxml_to_midi_convert(src_path, save_path)
+                elif src_ext == ".mml":
+                    mml_to_midi_convert(src_path, save_path)
                 else:
                     # MIDI -> MIDI 단순 복사
                     import shutil
@@ -469,14 +492,26 @@ class MusicXMLPlayer(QMainWindow):
             # 2. MusicXML 내보내기
             elif ext in (".xml", ".mxl"):
                 if src_ext in (".mid", ".midi"):
-                    compress = True if ext == ".mxl" else False
                     midi_to_mxml_convert(src_path, save_path)
+                elif src_ext == ".mml":
+                    midi_to_mxml_convert(bridge_to_midi(), save_path)
                 else:
                     # MusicXML 재포장 복사
                     import shutil
                     shutil.copy(src_path, save_path)
 
-            # 3. OGG / MP3 / WAV 렌더링 내보내기
+            # 3. MML 내보내기
+            elif ext == ".mml":
+                if src_ext in (".mid", ".midi"):
+                    midi_to_mml_convert(src_path, save_path)
+                elif src_ext in (".xml", ".mxl"):
+                    midi_to_mml_convert(bridge_to_midi(), save_path)
+                else:
+                    # MML -> MML 단순 복사
+                    import shutil
+                    shutil.copy(src_path, save_path)
+
+            # 4. OGG / MP3 / WAV 렌더링 내보내기
             elif ext in (".ogg", ".mp3", ".wav"):
                 fmt_param = ext.replace(".", "")
                 if src_ext in (".xml", ".mxl"):
@@ -488,8 +523,10 @@ class MusicXMLPlayer(QMainWindow):
                         format=fmt_param
                     )
                 else:
+                    # MIDI는 그대로, MML은 로드 시 이미 변환해 둔 재생용 임시 MIDI를 사용
+                    midi_src = self.current_midi_file if src_ext == ".mml" else src_path
                     midi_to_ogg(
-                        midi_path=src_path,
+                        midi_path=midi_src,
                         output=save_path,
                         sf2_path=self.current_sf2,
                         gain=self.volume_slider.value() / 100.0,
@@ -500,6 +537,11 @@ class MusicXMLPlayer(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", f"An error occurred during export:\n{e}")
         finally:
+            if temp_bridge_midi:
+                try:
+                    Path(temp_bridge_midi).unlink(missing_ok=True)
+                except Exception:
+                    pass
             self.lbl_total_time.setText("Ready")
 
     def on_change_soundfont(self):

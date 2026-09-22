@@ -14,6 +14,8 @@
 | :--- | :--- | :--- | :--- |
 | [`midi_to_musicxml.py`](./midi_to_musicxml.py) | MIDI / 악보 ➔ MusicXML (`.xml`, `.mxl`) | `music21` | 없음 |
 | [`musicxml_to_midi.py`](./musicxml_to_midi.py) | MusicXML / 악보 ➔ MIDI (`.mid`) | `music21` | 없음 |
+| [`mml_to_midi.py`](./mml_to_midi.py) | MML (`.mml`, 3MLE 형식) ➔ MIDI (`.mid`) | `music21` | 없음 |
+| [`midi_to_mml.py`](./midi_to_mml.py) | MIDI (`.mid`) ➔ MML (`.mml`, 3MLE 형식) | `music21` | 없음 |
 | [`midi_to_ogg.py`](./midi_to_ogg.py) | MIDI ➔ OGG 오디오 (`.ogg`) | `pyfluidsynth`, `pydub` | FluidSynth, FFmpeg, SoundFont |
 | [`musicxml_to_ogg.py`](./musicxml_to_ogg.py) | MusicXML ➔ OGG 오디오 (`.ogg`) | `music21`, `pyfluidsynth`, `pydub` | FluidSynth, FFmpeg, SoundFont |
 
@@ -105,7 +107,41 @@ MIDI 음원을 오디오 파일로 합성하기 위해서는 사운드폰트(`.s
 
 ---
 
-### 2. OGG / MP3 / WAV 오디오 파일 변환 (렌더링)
+### 2. MML ➔ MIDI 변환
+
+[`mml_to_midi.py`](./mml_to_midi.py)를 사용해 3MLE 형식의 MML 텍스트 악보(`.mml`, `[Settings]` / `[ChannelN]` 섹션 구조)를 MIDI로 변환합니다. 각 `[ChannelN]` 블록은 별도의 MIDI 트랙으로 변환되며, 음길이/부점, 옥타브(`<`/`>`), 음량(`v`), 악기(`@`), 타이(`&`) 명령을 해석합니다. `[3MLE EXTENSION]` 블록(압축 메타데이터)은 사용하지 않습니다.
+
+*   **기본 변환**:
+    ```bash
+    python mml_to_midi.py song.mml
+    ```
+    ➔ 같은 위치에 `song.mid`가 생성됩니다.
+*   **출력 경로 및 템포 지정**:
+    ```bash
+    python mml_to_midi.py song.mml output/song.mid --bpm 108
+    ```
+    *   `--bpm`: MML 안에 템포(`t`) 명령이 없을 때 사용할 기본 템포 (기본값: `120`).
+
+변환된 `.mid` 파일은 아래의 GUI 플레이어(`musicxml_player.py`)로 바로 재생하거나, [`midi_to_ogg.py`](./midi_to_ogg.py)로 오디오 파일로 렌더링할 수 있습니다.
+
+**관련 패키지에 대해**: 이 3MLE 형식의 MML 방언(`[Settings]` / `[ChannelN]` / `[3MLE EXTENSION]` 구조)을 지원하는 범용적이고 잘 관리되는 PyPI 패키지는 따로 없습니다. 마비노기/3MLE 커뮤니티에서 쓰이는 특수한 텍스트 포맷이라 표준화되어 있지 않기 때문입니다. 그래서 [`mml_to_midi.py`](./mml_to_midi.py)와 [`midi_to_mml.py`](./midi_to_mml.py)는 이미 프로젝트가 의존하는 `music21` 위에 직접 만든 전용 파서/생성기입니다.
+
+반대 방향인 MIDI ➔ MML 변환도 [`midi_to_mml.py`](./midi_to_mml.py)로 지원합니다:
+
+*   **기본 변환**:
+    ```bash
+    python midi_to_mml.py song.mid
+    ```
+    ➔ 같은 위치에 `song.mml`이 생성되며, MIDI 트랙마다 `[ChannelN]` 블록 하나씩 만들어집니다. 음길이/부점, 옥타브, 음량, 악기, 타이가 MIDI 데이터로부터 재구성되고, 마디 구분(`/*M n */`) 주석도 함께 붙습니다.
+*   **출력 경로 지정**:
+    ```bash
+    python midi_to_mml.py song.mid output/song.mml
+    ```
+*   **한계점**: MML 채널은 트래커 채널처럼 한 번에 한 음만 낼 수 있는 단선율입니다. 만약 한 MIDI 트랙 안에 (서로 다른 트랙이 아니라) 실제로 겹치는 두 개의 독립된 음이 있다면, 더 낮거나 짧게 겹치는 쪽을 잘라내어 재생 가능한 상태로 만듭니다. 그 외의 경우는 `mml_to_midi.py`를 통해 원본과 동일하게 왕복 변환됩니다. `[3MLE EXTENSION]` 블록(3MLE 내부 압축 체크섬)은 생성하지 않는데, 이는 `mml_to_midi.py`나 일반적인 MML 재생기로 재생하는 데는 영향이 없지만, 실제 3MLE GUI 에디터로 다시 불러올 경우 일부 3MLE 전용 기능은 인식되지 않을 수 있습니다.
+
+---
+
+### 3. OGG / MP3 / WAV 오디오 파일 변환 (렌더링)
 
 이 변환 단계는 내부적으로 FluidSynth CLI를 호출하여 MIDI 데이터를 사운드폰트 기반으로 합성한 후 지정한 포맷의 오디오 파일로 저장합니다.
 *   **지원 형식**: OGG, MP3, WAV (출력 파일의 확장자에 따라 자동 판정되거나 `--format` 옵션으로 수동 지정 가능, 기본값은 **OGG**)
@@ -161,7 +197,7 @@ MIDI 음원을 오디오 파일로 합성하기 위해서는 사운드폰트(`.s
 
 ## 🖥️ PySide6 GUI 플레이어 사용법 (`musicxml_player.py`)
 
-MusicXML 및 MIDI 파일을 열어 사운드폰트 기반으로 감상하고, 이를 다양한 형식으로 저장(Export)할 수 있는 직관적인 GUI 데스크톱 플레이어 애플리케이션입니다.
+MusicXML, MIDI, MML 파일을 열어 사운드폰트 기반으로 감상하고, 이를 다양한 형식으로 저장(Export)할 수 있는 직관적인 GUI 데스크톱 플레이어 애플리케이션입니다.
 
 *   **실행 방법**:
     가상환경이 활성화된 상태에서 아래 명령어를 실행합니다.
@@ -169,13 +205,13 @@ MusicXML 및 MIDI 파일을 열어 사운드폰트 기반으로 감상하고, �
     python musicxml_player.py
     ```
 *   **핵심 기능**:
-    *   **파일 불러오기**: 메뉴 바의 `파일` -> `불러오기(Open)`를 통해 MusicXML(`.xml`, `.mxl`) 및 MIDI(`.mid`, `.midi`) 파일을 불러옵니다.
+    *   **파일 불러오기**: 메뉴 바의 `파일` -> `불러오기(Open)`를 통해 MusicXML(`.xml`, `.mxl`), MIDI(`.mid`, `.midi`), MML(`.mml`, 3MLE 형식) 파일을 불러옵니다. MML 파일은 재생 전에 [`mml_to_midi.py`](./mml_to_midi.py)를 통해 즉시 MIDI로 변환됩니다.
     *   **실시간 오디오 합성 재생**: FluidSynth 플레이어를 활용하여 즉각적인 실시간 재생, 일시정지, 정지 기능을 제어합니다.
     *   **볼륨 제어**: 하단의 볼륨 슬라이더를 조정하여 신디사이저 마스터 볼륨 게인을 실시간으로 0.0~1.0 배율로 조절합니다.
     *   **커스텀 사운드폰트 교체**: 메인 화면의 `사운드폰트 변경...` 단추를 눌러 다른 커스텀 `.sf2` 음색 파일로 동적 교체할 수 있습니다. (기본값: 프로젝트 루트 내의 `FluidR3_GM.sf2`)
-    *   **다른 형식으로 저장하기(내보내기)**: 메뉴 바의 `파일` -> `저장하기(Export)`를 눌러 불러온 악보 리소스를 `MIDI`, `MusicXML`, `OGG`, `MP3`, `WAV` 중 원하는 포맷을 선택해 변환 저장합니다.
+    *   **다른 형식으로 저장하기(내보내기)**: 메뉴 바의 `파일` -> `저장하기(Export)`를 눌러 불러온 파일을 `MIDI`, `MusicXML`, `MML`, `OGG`, `MP3`, `WAV` 중 원하는 포맷으로 변환 저장합니다. 세 가지 악보 형식(MusicXML/MIDI/MML) 사이는 필요 시 [`midi_to_mml.py`](./midi_to_mml.py) / [`mml_to_midi.py`](./mml_to_midi.py) / [`midi_to_musicxml.py`](./midi_to_musicxml.py) / [`musicxml_to_midi.py`](./musicxml_to_midi.py)를 자동으로 거쳐 서로 변환됩니다.
 *   **💡 윈도우 연결 프로그램 및 자동 재생 지원 (더블클릭 실행)**:
-    *   윈도우 탐색기에서 `.mxl`, `.xml`, `.mid`, `.midi` 파일의 연결 프로그램으로 빌드된 `musicxml_player.exe` 파일을 등록해 두면, 악보 파일을 **더블클릭하는 즉시 프로그램이 실행되며 자동으로 소리가 즉시 재생(Auto-Play)**됩니다.
+    *   윈도우 탐색기에서 `.mxl`, `.xml`, `.mid`, `.midi`, `.mml` 파일의 연결 프로그램으로 빌드된 `musicxml_player.exe` 파일을 등록해 두면, 악보 파일을 **더블클릭하는 즉시 프로그램이 실행되며 자동으로 소리가 즉시 재생(Auto-Play)**됩니다.
 
 ---
 
@@ -203,6 +239,8 @@ MusicXML 및 MIDI 파일을 열어 사운드폰트 기반으로 감상하고, �
 # 3. 특정 변환 도구 개별 빌드
 .\build.ps1 -Target midi_to_musicxml
 .\build.ps1 -Target musicxml_to_midi
+.\build.ps1 -Target mml_to_midi
+.\build.ps1 -Target midi_to_mml
 .\build.ps1 -Target midi_to_ogg
 .\build.ps1 -Target musicxml_to_ogg
 ```

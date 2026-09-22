@@ -14,6 +14,8 @@ This project consists of core Python scripts and helper PowerShell scripts for s
 | :--- | :--- | :--- | :--- |
 | [`midi_to_musicxml.py`](./midi_to_musicxml.py) | MIDI / Score ➔ MusicXML (`.xml`, `.mxl`) | `music21` | None |
 | [`musicxml_to_midi.py`](./musicxml_to_midi.py) | MusicXML / Score ➔ MIDI (`.mid`) | `music21` | None |
+| [`mml_to_midi.py`](./mml_to_midi.py) | MML (`.mml`, 3MLE-style) ➔ MIDI (`.mid`) | `music21` | None |
+| [`midi_to_mml.py`](./midi_to_mml.py) | MIDI (`.mid`) ➔ MML (`.mml`, 3MLE-style) | `music21` | None |
 | [`midi_to_ogg.py`](./midi_to_ogg.py) | MIDI ➔ OGG Audio (`.ogg`) | `pyfluidsynth`, `pydub` | FluidSynth, FFmpeg, SoundFont |
 | [`musicxml_to_ogg.py`](./musicxml_to_ogg.py) | MusicXML ➔ OGG Audio (`.ogg`) | `music21`, `pyfluidsynth`, `pydub` | FluidSynth, FFmpeg, SoundFont |
 
@@ -105,7 +107,41 @@ Converts MusicXML files to MIDI files using [`musicxml_to_midi.py`](./musicxml_t
 
 ---
 
-### 2. OGG / MP3 / WAV Audio File Conversion (Rendering)
+### 2. MML ➔ MIDI Conversion
+
+Converts 3MLE-style MML text scores (`.mml`, with `[Settings]` / `[ChannelN]` sections) into MIDI using [`mml_to_midi.py`](./mml_to_midi.py). Each `[ChannelN]` block becomes its own MIDI track; note length, octave (`<`/`>`), volume (`v`), instrument (`@`), and ties (`&`) are all interpreted. The `[3MLE EXTENSION]` block (compressed metadata) is ignored.
+
+*   **Basic Conversion**:
+    ```bash
+    python mml_to_midi.py song.mml
+    ```
+    ➔ Creates `song.mid` in the same directory.
+*   **Specify Output Path and Tempo**:
+    ```bash
+    python mml_to_midi.py song.mml output/song.mid --bpm 108
+    ```
+    *   `--bpm`: Fallback tempo used when the MML has no `t` (tempo) command (default: `120`).
+
+Once you have a `.mid`, play it with the GUI player (`musicxml_player.py`, see below), or render it to audio with [`midi_to_ogg.py`](./midi_to_ogg.py).
+
+**Note on packages**: there is no widely-used, well-maintained PyPI package for this specific 3MLE-style MML dialect (the `[Settings]` / `[ChannelN]` / `[3MLE EXTENSION]` structure is a niche, game-community text format, not a standardized one). [`mml_to_midi.py`](./mml_to_midi.py) and [`midi_to_mml.py`](./midi_to_mml.py) are therefore custom parsers/generators built on top of `music21`, which the project already depends on.
+
+The reverse direction — MIDI ➔ MML — is also supported, via [`midi_to_mml.py`](./midi_to_mml.py):
+
+*   **Basic Conversion**:
+    ```bash
+    python midi_to_mml.py song.mid
+    ```
+    ➔ Creates `song.mml` in the same directory, one `[ChannelN]` block per MIDI track, with note lengths/dots, octave, volume, instrument, and ties re-derived from the MIDI data, plus measure (`/*M n */`) comments.
+*   **Specify Output Path**:
+    ```bash
+    python midi_to_mml.py song.mid output/song.mml
+    ```
+*   **Limitation**: an MML channel is monophonic (one note at a time), like a tracker channel. If a MIDI track contains real polyphony (two independent overlapping notes in the same track — as opposed to notes belonging to different tracks), the lower/shorter-overlapping note is dropped so the channel stays playable. Everything else round-trips losslessly through `mml_to_midi.py`. The `[3MLE EXTENSION]` block (a 3MLE-internal compressed checksum) is not generated; this doesn't affect playback with `mml_to_midi.py` or generic MML players, but a few 3MLE-editor-specific features may not be recognized if you re-import the file into the original 3MLE GUI tool.
+
+---
+
+### 3. OGG / MP3 / WAV Audio File Conversion (Rendering)
 
 This process calls the FluidSynth CLI internally to synthesize MIDI data using a SoundFont and outputs it as an audio file.
 *   **Supported Formats**: OGG, MP3, WAV (Automatically determined by the output file extension, or manually set using the `--format$옵션`. Default is **OGG**).
@@ -161,7 +197,7 @@ Uses [`musicxml_to_ogg.py`](./musicxml_to_ogg.py). It converts MusicXML to an in
 
 ## 🖥️ PySide6 GUI Player (`musicxml_player.py`)
 
-An intuitive GUI desktop player application that lets you open MusicXML and MIDI files, listen to them via SoundFont rendering, and export them into various formats.
+An intuitive GUI desktop player application that lets you open MusicXML, MIDI, and MML files, listen to them via SoundFont rendering, and export them into various formats.
 
 *   **How to Run**:
     Ensure the virtual environment is active and run:
@@ -169,13 +205,13 @@ An intuitive GUI desktop player application that lets you open MusicXML and MIDI
     python musicxml_player.py
     ```
 *   **Key Features**:
-    *   **Open File**: Use `File -> Open...` on the menu bar to open MusicXML (`.xml`, `.mxl`) or MIDI (`.mid`, `.midi`) files.
+    *   **Open File**: Use `File -> Open...` on the menu bar to open MusicXML (`.xml`, `.mxl`), MIDI (`.mid`, `.midi`), or MML (`.mml`, 3MLE-style) files. MML files are converted to MIDI on the fly via [`mml_to_midi.py`](./mml_to_midi.py) before playback.
     *   **Real-time Synthesis**: Play, pause, or stop playback instantly using FluidSynth.
     *   **Volume Control**: Adjust the volume slider to dynamically change the synthesizer gain (0.0 to 1.0).
     *   **Dynamic SoundFont Selection**: Click `Change SoundFont...` on the screen to load another `.sf2` sound file. (Default: `FluidR3_GM.sf2` in the root folder)
-    *   **Export File**: Select `File -> Export As...` to save the loaded score as `MIDI`, `MusicXML`, `OGG`, `MP3`, or `WAV`.
+    *   **Export File**: Select `File -> Export As...` to save the loaded file as `MIDI`, `MusicXML`, `MML`, `OGG`, `MP3`, or `WAV` — converting between any of the three score formats (via [`midi_to_mml.py`](./midi_to_mml.py) / [`mml_to_midi.py`](./mml_to_midi.py) / [`midi_to_musicxml.py`](./midi_to_musicxml.py) / [`musicxml_to_midi.py`](./musicxml_to_midi.py) as needed) as well as rendering to audio.
 *   **💡 File Association & Auto-Play Support**:
-    *   You can set the built `musicxml_player.exe` as the default program for `.mxl`, `.xml`, `.mid`, and `.midi` files in Windows Explorer. When you **double-click any score file, the player will start and automatically play the audio immediately (Auto-Play)**.
+    *   You can set the built `musicxml_player.exe` as the default program for `.mxl`, `.xml`, `.mid`, `.midi`, and `.mml` files in Windows Explorer. When you **double-click any score file, the player will start and automatically play the audio immediately (Auto-Play)**.
 
 ---
 
@@ -203,6 +239,8 @@ You can build targets individually or all at once using [`build.ps1`](./build.ps
 # 3. Build a specific utility only
 .\build.ps1 -Target midi_to_musicxml
 .\build.ps1 -Target musicxml_to_midi
+.\build.ps1 -Target mml_to_midi
+.\build.ps1 -Target midi_to_mml
 .\build.ps1 -Target midi_to_ogg
 .\build.ps1 -Target musicxml_to_ogg
 ```
