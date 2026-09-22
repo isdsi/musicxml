@@ -9,6 +9,7 @@ PySide6와 FluidSynth를 이용한 MusicXML & MIDI 신디사이저 플레이어�
 - FluidR3_GM.sf2 및 사용자 커스텀 사운드폰트(.sf2) 연동
 - 재생, 일시정지, 중단, 실시간 볼륨(마스터 게인) 조절
 - 로드된 파일을 MIDI, MusicXML, MML, OGG, MP3, WAV로 저장(Export) 지원
+- 채널(트랙)별 색상 구분 피아노롤 시각화 및 채널별 악기(GM 프로그램) 변경
 """
 
 import sys
@@ -19,10 +20,14 @@ from pathlib import Path
 # PySide6 GUI 임포트
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QSlider, QFileDialog, QMessageBox, QFrame
+    QPushButton, QLabel, QSlider, QFileDialog, QMessageBox, QFrame,
+    QComboBox, QScrollArea, QSizePolicy
 )
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QIcon, QFont, QAction
+from PySide6.QtGui import QIcon, QFont, QAction, QPainter, QColor, QPen
+
+# 악보 분석(채널/음표) 임포트
+import music21 as m21
 
 # 무설치 포터블 패키징을 위한 내부 bin/ 바이너리 폴더 PATH 최우선적 연동
 base_dir = os.path.dirname(sys.executable if getattr(sys, 'frozen', False) else __file__)
@@ -50,10 +55,126 @@ try:
     from musicxml_to_ogg import musicxml_to_ogg
     from midi_to_ogg import midi_to_ogg
     from mml_to_midi import mml_to_midi as mml_to_midi_convert
-    from midi_to_mml import midi_to_mml as midi_to_mml_convert
+    from midi_to_mml import midi_to_mml as midi_to_mml_convert, get_part_program
 except ImportError as e:
     print(f"[경고] 일부 변환 모듈을 로드하지 못했습니다: {e}")
     print("  변환 내보내기 기능이 제한될 수 있습니다.")
+
+
+# General MIDI Level 1 표준 악기명 (프로그램 번호 0-127)
+GM_INSTRUMENT_NAMES = [
+    "Acoustic Grand Piano", "Bright Acoustic Piano", "Electric Grand Piano", "Honky-tonk Piano",
+    "Electric Piano 1", "Electric Piano 2", "Harpsichord", "Clavinet",
+    "Celesta", "Glockenspiel", "Music Box", "Vibraphone",
+    "Marimba", "Xylophone", "Tubular Bells", "Dulcimer",
+    "Drawbar Organ", "Percussive Organ", "Rock Organ", "Church Organ",
+    "Reed Organ", "Accordion", "Harmonica", "Tango Accordion",
+    "Acoustic Guitar (nylon)", "Acoustic Guitar (steel)", "Electric Guitar (jazz)", "Electric Guitar (clean)",
+    "Electric Guitar (muted)", "Overdriven Guitar", "Distortion Guitar", "Guitar Harmonics",
+    "Acoustic Bass", "Electric Bass (finger)", "Electric Bass (pick)", "Fretless Bass",
+    "Slap Bass 1", "Slap Bass 2", "Synth Bass 1", "Synth Bass 2",
+    "Violin", "Viola", "Cello", "Contrabass",
+    "Tremolo Strings", "Pizzicato Strings", "Orchestral Harp", "Timpani",
+    "String Ensemble 1", "String Ensemble 2", "Synth Strings 1", "Synth Strings 2",
+    "Choir Aahs", "Voice Oohs", "Synth Voice", "Orchestra Hit",
+    "Trumpet", "Trombone", "Tuba", "Muted Trumpet",
+    "French Horn", "Brass Section", "Synth Brass 1", "Synth Brass 2",
+    "Soprano Sax", "Alto Sax", "Tenor Sax", "Baritone Sax",
+    "Oboe", "English Horn", "Bassoon", "Clarinet",
+    "Piccolo", "Flute", "Recorder", "Pan Flute",
+    "Blown Bottle", "Shakuhachi", "Whistle", "Ocarina",
+    "Lead 1 (square)", "Lead 2 (sawtooth)", "Lead 3 (calliope)", "Lead 4 (chiff)",
+    "Lead 5 (charang)", "Lead 6 (voice)", "Lead 7 (fifths)", "Lead 8 (bass+lead)",
+    "Pad 1 (new age)", "Pad 2 (warm)", "Pad 3 (polysynth)", "Pad 4 (choir)",
+    "Pad 5 (bowed)", "Pad 6 (metallic)", "Pad 7 (halo)", "Pad 8 (sweep)",
+    "FX 1 (rain)", "FX 2 (soundtrack)", "FX 3 (crystal)", "FX 4 (atmosphere)",
+    "FX 5 (brightness)", "FX 6 (goblins)", "FX 7 (echoes)", "FX 8 (sci-fi)",
+    "Sitar", "Banjo", "Shamisen", "Koto",
+    "Kalimba", "Bag Pipe", "Fiddle", "Shanai",
+    "Tinkle Bell", "Agogo", "Steel Drums", "Woodblock",
+    "Taiko Drum", "Melodic Tom", "Synth Drum", "Reverse Cymbal",
+    "Guitar Fret Noise", "Breath Noise", "Seashore", "Bird Tweet",
+    "Telephone Ring", "Helicopter", "Applause", "Gunshot",
+]
+
+# 채널별 피아노롤 색상 팔레트 (순환 사용)
+CHANNEL_COLORS = [
+    QColor("#f472b6"), QColor("#4ade80"), QColor("#60a5fa"), QColor("#22d3ee"),
+    QColor("#fbbf24"), QColor("#a78bfa"), QColor("#fb923c"), QColor("#facc15"),
+    QColor("#34d399"),
+]
+
+
+class PianoRollWidget(QWidget):
+    """채널별로 색상을 구분해 음표를 그려주는 읽기전용 피아노롤 위젯."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.channels = []      # [{"notes": [(offset_ql, dur_ql, pitch_midi), ...], "color": QColor}, ...]
+        self.total_ql = 4.0
+        self.playhead_ql = 0.0
+        self.min_pitch = 48
+        self.max_pitch = 84
+        self.setMinimumHeight(200)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+
+    def set_data(self, channels, total_ql):
+        """채널별 음표 목록과 전체 길이(quarterLength)를 갱신하고 다시 그립니다."""
+        self.channels = channels
+        self.total_ql = max(total_ql, 0.001)
+
+        all_pitches = [p for ch in self.channels for (_, _, p) in ch["notes"]]
+        if all_pitches:
+            self.min_pitch = min(all_pitches) - 2
+            self.max_pitch = max(all_pitches) + 2
+        else:
+            self.min_pitch, self.max_pitch = 48, 84
+
+        self.playhead_ql = 0.0
+        self.update()
+
+    def set_playhead(self, ql):
+        self.playhead_ql = max(0.0, min(ql, self.total_ql))
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, False)
+        painter.fillRect(self.rect(), QColor("#0f0f11"))
+
+        w = max(self.width(), 1)
+        h = max(self.height(), 1)
+        pitch_range = max(self.max_pitch - self.min_pitch, 1)
+        row_h = h / pitch_range
+
+        def x_for(ql):
+            return (ql / self.total_ql) * w
+
+        def y_for(pitch):
+            return h - (pitch - self.min_pitch) / pitch_range * h
+
+        # 옥타브(C음) 기준 가로 안내선
+        painter.setPen(QPen(QColor("#27272a"), 1))
+        for pitch in range(self.min_pitch, self.max_pitch + 1):
+            if pitch % 12 == 0:  # C 음
+                y = int(y_for(pitch))
+                painter.drawLine(0, y, w, y)
+
+        # 채널별 음표 사각형
+        for ch in self.channels:
+            painter.setBrush(ch["color"])
+            painter.setPen(Qt.NoPen)
+            for offset_ql, dur_ql, pitch in ch["notes"]:
+                x = x_for(offset_ql)
+                bar_w = max(x_for(offset_ql + dur_ql) - x, 2)
+                y = y_for(pitch)
+                painter.drawRect(int(x), int(y - row_h * 0.4), int(bar_w) - 1, max(int(row_h * 0.8), 2))
+
+        # 재생 위치(플레이헤드)
+        if self.total_ql > 0:
+            painter.setPen(QPen(QColor("#ef4444"), 2))
+            px = int(x_for(self.playhead_ql))
+            painter.drawLine(px, 0, px, h)
 
 
 class MusicXMLPlayer(QMainWindow):
@@ -61,16 +182,23 @@ class MusicXMLPlayer(QMainWindow):
         super().__init__()
         
         self.setWindowTitle("MusicXML & MIDI Synthesizer Player")
-        self.resize(650, 420)
-        
+        self.resize(900, 700)
+
         # 상태 변수 초기화
-        self.current_file = None      # 사용자 로드 파일 경로 (xml/mxl/mid/midi)
-        self.current_midi_file = None # 실제 재생용 MIDI 파일 경로 (MusicXML인 경우 임시 변환 파일)
+        self.current_file = None      # 사용자 로드 파일 경로 (xml/mxl/mid/midi/mml)
+        self.current_midi_file = None # 실제 재생용 MIDI 파일 경로 (MusicXML/MML인 경우 임시 변환 파일)
         self.temp_midi_obj = None     # 임시 MIDI 파일 리소스 관리를 위한 객체
         self.current_sf2 = "FluidR3_GM.sf2"
         self.is_playing = False
         self.is_paused = False
         self.play_time_seconds = 0
+
+        # 채널/피아노롤 분석 상태
+        self.loaded_score = None      # 현재 재생용 MIDI를 music21로 분석한 Score (악기 변경용)
+        self.tempo_bpm = 120
+        self.total_ql = 4.0
+        self.channel_rows = []        # [(QLabel, QComboBox), ...] 채널 패널 위젯 목록
+        self.instrument_modified = False  # 채널 패널에서 악기를 바꿔 원본과 달라졌는지 여부 (Export 시 반영용)
         
         # Fluidsynth 엔진 인스턴스 변수
         self.fs_synth = None
@@ -271,7 +399,47 @@ class MusicXMLPlayer(QMainWindow):
         sf2_layout.addWidget(btn_change_sf2)
         main_layout.addLayout(sf2_layout)
 
-        # 3. 진행 상황 타임라인 표시 및 진행 슬라이더
+        # 3. 채널별 악기 패널 (채널마다 이름 + 악기 선택 콤보박스)
+        channels_card = QFrame()
+        channels_card.setObjectName("card")
+        channels_card_layout = QVBoxLayout(channels_card)
+        channels_card_layout.setContentsMargins(15, 12, 15, 12)
+
+        lbl_channels_title = QLabel("Channels & Instruments")
+        lbl_channels_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #a1a1aa;")
+        channels_card_layout.addWidget(lbl_channels_title)
+
+        self.channels_scroll = QScrollArea()
+        self.channels_scroll.setWidgetResizable(True)
+        self.channels_scroll.setFixedHeight(120)
+        self.channels_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+
+        self.channels_container = QWidget()
+        self.channels_layout = QVBoxLayout(self.channels_container)
+        self.channels_layout.setContentsMargins(0, 4, 0, 0)
+        self.channels_layout.setSpacing(4)
+        self.channels_layout.addStretch()
+        self.channels_scroll.setWidget(self.channels_container)
+
+        channels_card_layout.addWidget(self.channels_scroll)
+        main_layout.addWidget(channels_card)
+
+        # 4. 피아노롤 (채널별 색상 구분 음표 시각화)
+        pianoroll_card = QFrame()
+        pianoroll_card.setObjectName("card")
+        pianoroll_card_layout = QVBoxLayout(pianoroll_card)
+        pianoroll_card_layout.setContentsMargins(15, 12, 15, 12)
+
+        lbl_pianoroll_title = QLabel("Piano Roll")
+        lbl_pianoroll_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #a1a1aa;")
+        pianoroll_card_layout.addWidget(lbl_pianoroll_title)
+
+        self.piano_roll = PianoRollWidget()
+        pianoroll_card_layout.addWidget(self.piano_roll)
+
+        main_layout.addWidget(pianoroll_card, stretch=1)
+
+        # 5. 진행 상황 타임라인 표시 및 진행 슬라이더
         progress_layout = QHBoxLayout()
         self.lbl_current_time = QLabel("00:00")
         self.lbl_current_time.setStyleSheet("font-size: 12px; color: #a1a1aa;")
@@ -290,7 +458,7 @@ class MusicXMLPlayer(QMainWindow):
         progress_layout.addWidget(self.lbl_total_time)
         main_layout.addLayout(progress_layout)
 
-        # 4. 플레이어 메인 컨트롤러 버튼 영역
+        # 6. 플레이어 메인 컨트롤러 버튼 영역
         control_layout = QHBoxLayout()
         
         self.btn_play = QPushButton("Play")
@@ -388,6 +556,7 @@ class MusicXMLPlayer(QMainWindow):
         self.cleanup_temp_midi()
 
         self.current_file = file_path
+        self.instrument_modified = False
         path_obj = Path(file_path)
         suffix = path_obj.suffix.lower()
 
@@ -433,6 +602,9 @@ class MusicXMLPlayer(QMainWindow):
         self.lbl_total_time.setText("Ready")
         self.timeline_slider.setValue(0)
 
+        # 채널/피아노롤 분석 갱신 (실패해도 재생 자체는 계속 가능해야 하므로 별도 예외 처리)
+        self.refresh_channels_and_roll()
+
     def on_export_file(self):
         """로드된 악보 리소스를 사용자가 원하는 포맷으로 변환 저장합니다."""
         if not self.current_file:
@@ -459,6 +631,10 @@ class MusicXMLPlayer(QMainWindow):
         src_path = self.current_file
         src_ext = Path(src_path).suffix.lower()
 
+        # 채널 패널에서 악기를 바꿨다면, 원본이 아니라 그 변경이 반영된 현재 재생용 MIDI를
+        # 모든 내보내기의 기준으로 사용합니다 (그래야 새 악기가 실제로 저장됨).
+        effective_midi = self.current_midi_file if self.instrument_modified else None
+
         # 진행 표시 알림 대기
         self.lbl_total_time.setText("Exporting...")
         QApplication.processEvents()
@@ -478,43 +654,56 @@ class MusicXMLPlayer(QMainWindow):
             return temp_bridge_midi
 
         try:
+            import shutil
+
             # 1. MIDI 내보내기
             if ext in (".mid", ".midi"):
-                if src_ext in (".xml", ".mxl"):
+                if effective_midi:
+                    shutil.copy(effective_midi, save_path)
+                elif src_ext in (".xml", ".mxl"):
                     mxml_to_midi_convert(src_path, save_path)
                 elif src_ext == ".mml":
                     mml_to_midi_convert(src_path, save_path)
                 else:
                     # MIDI -> MIDI 단순 복사
-                    import shutil
                     shutil.copy(src_path, save_path)
 
             # 2. MusicXML 내보내기
             elif ext in (".xml", ".mxl"):
-                if src_ext in (".mid", ".midi"):
+                if effective_midi:
+                    midi_to_mxml_convert(effective_midi, save_path)
+                elif src_ext in (".mid", ".midi"):
                     midi_to_mxml_convert(src_path, save_path)
                 elif src_ext == ".mml":
                     midi_to_mxml_convert(bridge_to_midi(), save_path)
                 else:
                     # MusicXML 재포장 복사
-                    import shutil
                     shutil.copy(src_path, save_path)
 
             # 3. MML 내보내기
             elif ext == ".mml":
-                if src_ext in (".mid", ".midi"):
+                if effective_midi:
+                    midi_to_mml_convert(effective_midi, save_path)
+                elif src_ext in (".mid", ".midi"):
                     midi_to_mml_convert(src_path, save_path)
                 elif src_ext in (".xml", ".mxl"):
                     midi_to_mml_convert(bridge_to_midi(), save_path)
                 else:
                     # MML -> MML 단순 복사
-                    import shutil
                     shutil.copy(src_path, save_path)
 
             # 4. OGG / MP3 / WAV 렌더링 내보내기
             elif ext in (".ogg", ".mp3", ".wav"):
                 fmt_param = ext.replace(".", "")
-                if src_ext in (".xml", ".mxl"):
+                if effective_midi:
+                    midi_to_ogg(
+                        midi_path=effective_midi,
+                        output=save_path,
+                        sf2_path=self.current_sf2,
+                        gain=self.volume_slider.value() / 100.0,
+                        format=fmt_param
+                    )
+                elif src_ext in (".xml", ".mxl"):
                     musicxml_to_ogg(
                         xml_path=src_path,
                         output=save_path,
@@ -560,6 +749,146 @@ class MusicXMLPlayer(QMainWindow):
                     self.on_play_clicked()
             else:
                 QMessageBox.warning(self, "Load Failed", "Not a valid SoundFont file.")
+
+    # -----------------------------------------------------------------------
+    # 채널별 악기 패널 & 피아노롤
+    # -----------------------------------------------------------------------
+
+    def refresh_channels_and_roll(self):
+        """현재 재생용 MIDI(self.current_midi_file)를 분석해 채널 패널과 피아노롤을 다시 그립니다."""
+        self._clear_channel_rows()
+
+        if not self.current_midi_file:
+            self.loaded_score = None
+            self.piano_roll.set_data([], 4.0)
+            return
+
+        try:
+            score = m21.converter.parse(str(self.current_midi_file))
+        except Exception as e:
+            print(f"[경고] 채널 분석을 위한 MIDI 파싱 실패: {e}")
+            self.loaded_score = None
+            self.piano_roll.set_data([], 4.0)
+            return
+
+        self.loaded_score = score
+
+        mm_list = score.flatten().getElementsByClass(m21.tempo.MetronomeMark)
+        self.tempo_bpm = round(mm_list[0].number) if len(mm_list) and mm_list[0].number else 120
+
+        parts = score.parts if len(score.parts) else [score]
+        roll_channels = []
+        max_ql = 0.0
+
+        for i, part in enumerate(parts):
+            program = get_part_program(part, m21)
+
+            notes = []
+            for el in part.flatten().notesAndRests:
+                if isinstance(el, m21.chord.Chord):
+                    pitches = [p.midi for p in el.pitches]
+                elif isinstance(el, m21.note.Note):
+                    pitches = [el.pitch.midi]
+                else:
+                    continue
+                off = float(el.offset)
+                dur = float(el.duration.quarterLength)
+                max_ql = max(max_ql, off + dur)
+                for midi_num in pitches:
+                    notes.append((off, dur, midi_num))
+
+            color = CHANNEL_COLORS[i % len(CHANNEL_COLORS)]
+            roll_channels.append({"notes": notes, "color": color})
+
+            self._add_channel_row(i, program, color)
+
+        self.total_ql = max(max_ql, 0.001)
+        self.piano_roll.set_data(roll_channels, self.total_ql)
+
+    def _clear_channel_rows(self):
+        """채널 패널의 기존 행(라벨+콤보박스)을 모두 제거합니다."""
+        for row, combo in self.channel_rows:
+            self.channels_layout.removeWidget(row)
+            row.setParent(None)
+            row.deleteLater()
+        self.channel_rows = []
+
+    def _add_channel_row(self, index, program, color):
+        """채널 패널에 채널 하나(색상 표시 + 악기 선택 콤보박스)를 추가합니다."""
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(8)
+
+        swatch = QLabel()
+        swatch.setFixedSize(14, 14)
+        swatch.setStyleSheet(f"background-color: {color.name()}; border-radius: 3px;")
+
+        label = QLabel(f"Ch{index + 1}")
+        label.setFixedWidth(40)
+        label.setStyleSheet("font-size: 12px; color: #e4e4e7;")
+
+        combo = QComboBox()
+        combo.addItems([f"{i:03d}: {name}" for i, name in enumerate(GM_INSTRUMENT_NAMES)])
+        combo.setCurrentIndex(max(0, min(program, 127)))
+        combo.setStyleSheet("""
+            QComboBox { background-color: #3f3f46; color: #ffffff; border-radius: 4px; padding: 3px 6px; font-size: 12px; }
+            QComboBox QAbstractItemView { background-color: #27272a; color: #e4e4e7; selection-background-color: #0284c7; }
+        """)
+        combo.currentIndexChanged.connect(lambda program_idx, ch=index: self.on_channel_instrument_changed(ch, program_idx))
+
+        row_layout.addWidget(swatch)
+        row_layout.addWidget(label)
+        row_layout.addWidget(combo, stretch=1)
+
+        # stretch 아이템 앞에 삽입
+        self.channels_layout.insertWidget(self.channels_layout.count() - 1, row)
+        self.channel_rows.append((row, combo))
+
+    def on_channel_instrument_changed(self, channel_index, program):
+        """채널 패널에서 악기를 바꾸면 해당 파트의 악기를 갱신하고 재생용 MIDI를 재생성합니다."""
+        if not self.loaded_score or channel_index >= len(self.loaded_score.parts):
+            return
+
+        part = self.loaded_score.parts[channel_index]
+        for inst in list(part.recurse().getElementsByClass(m21.instrument.Instrument)):
+            part.remove(inst, recurse=True)
+        new_inst = m21.instrument.Instrument()
+        new_inst.midiProgram = program
+        part.insert(0, new_inst)
+
+        # 원본과 달라졌음을 표시 (Export 시 이 변경을 반영하기 위함)
+        self.instrument_modified = True
+
+        # 색상 스와치는 그대로 두고, 재생용 MIDI만 새 악기 반영해 재생성
+        self._rewrite_temp_midi_from_score()
+
+    def _rewrite_temp_midi_from_score(self):
+        """현재 self.loaded_score를 새 임시 MIDI로 내보내고, 재생 대상 파일을 교체합니다."""
+        if not self.loaded_score:
+            return
+
+        # 재생 중이면 정지 (악기 변경은 다음 재생부터 반영되면 충분함)
+        self.on_stop_clicked()
+
+        old_temp_to_remove = self.current_midi_file if self.temp_midi_obj else None
+
+        new_temp_obj = tempfile.NamedTemporaryFile(suffix=".mid", delete=False)
+        new_temp_obj.close()
+        try:
+            self.loaded_score.write("midi", fp=new_temp_obj.name)
+        except Exception as e:
+            QMessageBox.warning(self, "Instrument Change Failed", f"Failed to apply instrument change:\n{e}")
+            return
+
+        if old_temp_to_remove:
+            try:
+                Path(old_temp_to_remove).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        self.temp_midi_obj = new_temp_obj
+        self.current_midi_file = new_temp_obj.name
 
     def on_play_clicked(self):
         """오디오 실시간 합성을 시작합니다."""
@@ -622,7 +951,8 @@ class MusicXMLPlayer(QMainWindow):
         self.timer.stop()
         self.play_time_seconds = 0
         self.lbl_current_time.setText("00:00")
-        
+        self.piano_roll.set_playhead(0.0)
+
         try:
             if hasattr(self.fs_synth, "player") and self.fs_synth.player:
                 # play_midi_stop가 내부적으로 stop, seek, delete_player를 전부 한 번에 안전히 해줌
@@ -649,12 +979,16 @@ class MusicXMLPlayer(QMainWindow):
                 print(f"[경고] 볼륨 조절 실패: {e}")
 
     def update_playback_time(self):
-        """1초마다 재생 경과 시간을 업데이트하여 라벨에 표기합니다."""
+        """1초마다 재생 경과 시간을 업데이트하여 라벨과 피아노롤 플레이헤드에 표기합니다."""
         if self.is_playing:
             self.play_time_seconds += 1
             mins = self.play_time_seconds // 60
             secs = self.play_time_seconds % 60
             self.lbl_current_time.setText(f"{mins:02d}:{secs:02d}")
+
+            # 경과 시간(초) -> quarterLength로 환산해 피아노롤 재생 위치 갱신 (근사치, 1초 단위)
+            ql = self.play_time_seconds * (self.tempo_bpm / 60.0)
+            self.piano_roll.set_playhead(ql)
 
     # -----------------------------------------------------------------------
     # 리소스 안전 정리 (Cleanup)

@@ -83,6 +83,22 @@ def _velocity_to_v(velocity: int) -> int:
     return max(0, min(15, round((velocity or 100) / 127 * 15)))
 
 
+def get_part_program(part, m21) -> int:
+    """
+    Part의 현재 GM 악기 프로그램 번호를 안전하게 읽어옵니다.
+
+    music21이 MIDI 파일을 파싱하면 같은 위치(offset 0)에 동일한 정보를 담은
+    Instrument 객체가 중복으로 생기는 경우가 있는데, 이때 part.getInstrument()는
+    midiProgram이 비어있는 기본 Instrument를 돌려줄 수 있다. 따라서 실제
+    Instrument 객체들을 직접 훑어 midiProgram이 채워진 값을 찾는다.
+    """
+    instruments = list(part.recurse().getElementsByClass(m21.instrument.Instrument))
+    for inst in reversed(instruments):
+        if inst.midiProgram is not None:
+            return inst.midiProgram
+    return 0
+
+
 def _collect_events(part, m21):
     """
     Part를 순회하여 (offset_units, duration_units, pitch_or_None, velocity) 리스트를 생성합니다.
@@ -141,12 +157,7 @@ def _part_to_channel_lines(part, m21, measure_units: int, extra_prefix: str = ""
     octave = 4
     velocity_bucket = -1
 
-    try:
-        program = part.getInstrument(returnDefault=True).midiProgram
-    except Exception:
-        program = None
-    if program is None:
-        program = 0
+    program = get_part_program(part, m21)
 
     def emit(measure_idx, text):
         measure_lines[measure_idx] += text
