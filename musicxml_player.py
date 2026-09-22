@@ -1032,7 +1032,7 @@ class MusicXMLPlayer(QMainWindow):
             "<h3>MusicXML & MIDI Synthesizer Player</h3>"
             "<p>Version: 1.0.0 (PySide6)</p>"
             "<p>This program is a score player using <b>music21</b> converter and <b>FluidSynth</b> SoundFont rendering.</p>"
-            "<p>© 2026 Advanced Agentic Coding Project.</p>"
+            "<p>© 2026 isdsi.</p>"
         )
 
 

@@ -273,3 +273,9 @@ Upon completion, a success message will appear in green in the terminal.
     *   Therefore, the target PC must have `fluidsynth` and `ffmpeg` installed and registered in the system `PATH` env.
 3.  **Initial Startup Time**:
     Standalone executables packaged with `--onefile` extract libraries to a temporary directory on their first execution. This might take a few seconds and is normal behavior.
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](./LICENSE) © 2026 isdsi.
