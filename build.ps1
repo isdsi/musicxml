@@ -8,11 +8,13 @@
 #   all               : 4개 유틸리티 모두 빌드 (기본값)
 #   midi_to_musicxml  : MIDI ➔ MusicXML 변환기 빌드
 #   musicxml_to_midi  : MusicXML ➔ MIDI 변환기 빌드
+#   mml_to_midi       : MML ➔ MIDI 변환기 빌드
+#   midi_to_mml       : MIDI ➔ MML 변환기 빌드
 #   midi_to_ogg       : MIDI ➔ OGG 변환기 빌드 (music21 미사용으로 빠름)
 #   musicxml_to_ogg   : MusicXML ➔ OGG 변환기 빌드 (시간이 수 분 소요됨)
 
 Param(
-    [ValidateSet("all", "midi_to_musicxml", "musicxml_to_midi", "midi_to_ogg", "musicxml_to_ogg", "musicxml_player")]
+    [ValidateSet("all", "midi_to_musicxml", "musicxml_to_midi", "mml_to_midi", "midi_to_mml", "midi_to_ogg", "musicxml_to_ogg", "musicxml_player")]
     [string]$Target = "all"
 )
 
@@ -117,6 +119,14 @@ if ($Target -eq "all" -or $Target -eq "midi_to_musicxml") {
 
 if ($Target -eq "all" -or $Target -eq "musicxml_to_midi") {
     Build-Target -name "musicxml_to_midi" -script "musicxml_to_midi.py" -useMusic21 $true
+}
+
+if ($Target -eq "all" -or $Target -eq "mml_to_midi") {
+    Build-Target -name "mml_to_midi" -script "mml_to_midi.py" -useMusic21 $true
+}
+
+if ($Target -eq "all" -or $Target -eq "midi_to_mml") {
+    Build-Target -name "midi_to_mml" -script "midi_to_mml.py" -useMusic21 $true
 }
 
 if ($Target -eq "all" -or $Target -eq "midi_to_ogg") {
